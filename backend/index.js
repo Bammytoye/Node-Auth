@@ -15,7 +15,7 @@ app.use(cookieParser());
 app.use(express.json()); //...for req.body
 app.use(express.urlencoded({extended: true}))
 
-app.use('/api/v1/auth', authRouter)
+app.use('/api/v1/auth', authRouter) //route
 
 mongoose.connect(process.env.MONGO_URI).then(() => {
     console.log('Database Connected')
