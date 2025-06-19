@@ -2,6 +2,9 @@ const jwt = require('jsonwebtoken');
 const { signUpSchema, signInSchema } = require("../middlewares/validator");
 const usersModel = require("../models/usersModel");
 const { hashingPassword, hashingPasswordValidation } = require("../utils/hashingPassword");
+const { transport } = require('../middlewares/sendMail');
+const hmacProcess = (value, key) => createHmac('sha256', key).update(value).digest('hex');
+const { createHmac } = require('crypto');
 
 async function signUp(req, res) {
     const { email, password } = req.body;
@@ -55,7 +58,9 @@ async function signIn(req, res) {
             userId: user._id,
             email: user.email, 
             verified: user.verified, 
-        }, process.env.JWT_SECRET);
+        }, process.env.JWT_SECRET, {
+            expiresIn: '1h',
+        });
 
         res.cookie('Authorization', 'Bearer ' + token, { expires: new Date(Date.now() + 
             8 * 3600000),
@@ -73,4 +78,50 @@ async function signIn(req, res) {
     }
 }
 
-module.exports = { signUp, signIn };
+async function logOut(req, res) {
+    res.clearCookie('Authorization')
+    .status(200)
+    .json({ success: true, message: 'User logged out successfully' });
+}
+
+async function sendVerificationCode(req, res, next) {
+    const { email } = req.body;
+
+    try {
+        const existingUser = await usersModel.findOne({ email });
+
+        if (!existingUser) {
+            return res.status(404)
+            .json({ success: false, message: 'User does not exist' });
+        }
+
+        if (existingUser.verified) {
+            return res.status(400)
+            .json({ success: false, message: 'User already verified' });
+        }
+
+        const codeValue = Math.floor(100000 + Math.random() * 900000).toString(); // always 6 digits
+
+        let info = await transport.sendMail({
+            from: process.env.NODE_CODE_SENDING_EMAIL_ADDRESS,
+            to: existingUser.email,
+            subject: 'Verification Code',
+            text: `Your verification code is ${codeValue}`,
+        })
+
+        if (info.accepted[0] === existingUser.email) {
+            const hashedCodeValue = hmacProcess(codeValue, process.env.HMAC_VERIFICATION_CODE_SECRET) 
+            existingUser.verificationCode = hashedCodeValue;
+            existingUser.verificationCodeValidation = Date.now()
+            await existingUser.save();
+            return res.status(200) 
+            .json({ success: true, message: 'Verification code sent successfully' });
+        }
+            res.status(400).json({ success: false, message: 'Verification code not sent' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+}
+
+module.exports = { signUp, signIn, logOut, sendVerificationCode };
