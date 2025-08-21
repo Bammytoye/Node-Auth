@@ -44,4 +44,15 @@ const signInSchema = Joi.object({
         }),
 });
 
-module.exports = { signUpSchema, signInSchema };
+const acceptCodeSchema = Joi.object({
+    email: Joi.string()
+        .min(6)
+        .max(70)
+        .required()
+        .email({ 
+            tlds: { allow: ['com', 'net'] } 
+        }),
+        providedCode: Joi.number()
+})
+
+module.exports = { signUpSchema, signInSchema, acceptCodeSchema };

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { signUpSchema, signInSchema } = require("../middlewares/validator");
+const { signUpSchema, signInSchema, acceptCodeSchema } = require("../middlewares/validator");
 const usersModel = require("../models/usersModel");
 const { hashingPassword, hashingPasswordValidation } = require("../utils/hashingPassword");
 const { transport } = require('../middlewares/sendMail');
@@ -124,4 +124,51 @@ async function sendVerificationCode(req, res, next) {
     }
 }
 
-module.exports = { signUp, signIn, logOut, sendVerificationCode };
+async function verifyVerificationCode(req, res, next) {
+    const { email , providedCode } = req.body;
+
+    try {
+        const { error, value } = acceptCodeSchema.validate({ email, providedCode });
+
+        if (error) {
+            return res.status(401).json({ success: false, message: error.details[0].message });
+        }
+
+        const codeValue = providedCode.toString();
+        const existingUser = await usersModel.findOne({ email }).select(' +verificationCode +verificationCodeValidation');
+
+        if (!existingUser) {
+            return res.status(401)
+            .json({ success: false, message: 'User does not exist' });
+        }
+
+        if(existingUser.verified) {
+            return res.status(400).json({success: false, message: 'User already verified'})
+        }
+
+        // If verification code is not set or validation time is not set, we assume the user has not been verified yet
+        if(!existingUser.verificationCode || !existingUser.verificationCodeValidation) {
+            return res.status(400).json({ success: false, message: 'Something is wrong with the code!' });
+        }
+
+        if (Date.now() - existingUser.verificationCodeValidation > 600000) {
+            return res.status(400).json({ success: false, message: 'Verification code expired' });
+        }
+
+        const hashedCodeValue = hmacProcess(codeValue, process.env.HMAC_VERIFICATION_CODE_SECRET);
+
+        if (hashedCodeValue === existingUser.verificationCode) {
+            existingUser.verified = true;
+            existingUser.verificationCode = undefined;
+            existingUser.verificationCodeValidation = undefined;
+            await existingUser.save();
+            return res.status(200).json({ success: true, message: 'Your account has been verified' }) 
+        }
+            return res.status(400).json({ success: false, message: 'unexpected occurred' }) 
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+}   
+
+module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode };
