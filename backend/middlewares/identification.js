@@ -13,7 +13,8 @@ exports.identifier = (req, res, next) => {
     }
 
     try {
-        const userToken = jwt.verify(userToken, process.env.TOKEN_SECRET);
+        const userToken = token.split(' ')[1];
+        const jwtVerified = jwt.verify(userToken, process.env.TOKEN_SECRET);
         if (jwtVerified) {
             req.user = jwtVerified;
             next();
@@ -23,4 +24,4 @@ exports.identifier = (req, res, next) => {
     } catch (err) {
         console.log(err);
     }
-}
+} 

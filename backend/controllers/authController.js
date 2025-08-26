@@ -171,4 +171,15 @@ async function verifyVerificationCode(req, res, next) {
     }
 }   
 
-module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode };
+async function changePassword(req, res, next) {
+    const { userId, verified } = req.user;
+    const { oldPassword, newPassword} = req.body;
+
+    try {
+
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode, changePassword };
