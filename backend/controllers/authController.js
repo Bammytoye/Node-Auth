@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { signUpSchema, signInSchema, acceptCodeSchema } = require("../middlewares/validator");
+const { signUpSchema, signInSchema, acceptCodeSchema, changePasswordSchema } = require("../middlewares/validator");
 const usersModel = require("../models/usersModel");
 const { hashingPassword, hashingPasswordValidation } = require("../utils/hashingPassword");
 const { transport } = require('../middlewares/sendMail');
@@ -54,24 +54,25 @@ async function signIn(req, res) {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
 
-        const token = jwt.sign({ 
+        const token = jwt.sign({
             userId: user._id,
-            email: user.email, 
-            verified: user.verified, 
+            email: user.email,
+            verified: user.verified,
         }, process.env.JWT_SECRET, {
             expiresIn: '1h',
         });
 
-        res.cookie('Authorization', 'Bearer ' + token, { expires: new Date(Date.now() + 
-            8 * 3600000),
+        res.cookie('Authorization', 'Bearer ' + token, {
+            expires: new Date(Date.now() +
+                8 * 3600000),
             httpOnly: process.env.NODE_ENV === 'production',
             secure: process.env.NODE_ENV === 'production',
-        }).json ({
+        }).json({
             success: true,
             token,
             message: 'User logged in successfully'
         });
-        
+
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Internal server error' });
@@ -80,8 +81,8 @@ async function signIn(req, res) {
 
 async function logOut(req, res) {
     res.clearCookie('Authorization')
-    .status(200)
-    .json({ success: true, message: 'User logged out successfully' });
+        .status(200)
+        .json({ success: true, message: 'User logged out successfully' });
 }
 
 async function sendVerificationCode(req, res, next) {
@@ -92,12 +93,12 @@ async function sendVerificationCode(req, res, next) {
 
         if (!existingUser) {
             return res.status(404)
-            .json({ success: false, message: 'User does not exist' });
+                .json({ success: false, message: 'User does not exist' });
         }
 
         if (existingUser.verified) {
             return res.status(400)
-            .json({ success: false, message: 'User already verified' });
+                .json({ success: false, message: 'User already verified' });
         }
 
         const codeValue = Math.floor(100000 + Math.random() * 900000).toString(); // always 6 digits
@@ -110,14 +111,14 @@ async function sendVerificationCode(req, res, next) {
         })
 
         if (info.accepted[0] === existingUser.email) {
-            const hashedCodeValue = hmacProcess(codeValue, process.env.HMAC_VERIFICATION_CODE_SECRET) 
+            const hashedCodeValue = hmacProcess(codeValue, process.env.HMAC_VERIFICATION_CODE_SECRET)
             existingUser.verificationCode = hashedCodeValue;
             existingUser.verificationCodeValidation = Date.now()
             await existingUser.save();
-            return res.status(200) 
-            .json({ success: true, message: 'Verification code sent successfully' });
+            return res.status(200)
+                .json({ success: true, message: 'Verification code sent successfully' });
         }
-            res.status(400).json({ success: false, message: 'Verification code not sent' });
+        res.status(400).json({ success: false, message: 'Verification code not sent' });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Internal server error' });
@@ -125,7 +126,7 @@ async function sendVerificationCode(req, res, next) {
 }
 
 async function verifyVerificationCode(req, res, next) {
-    const { email , providedCode } = req.body;
+    const { email, providedCode } = req.body;
 
     try {
         const { error, value } = acceptCodeSchema.validate({ email, providedCode });
@@ -139,15 +140,15 @@ async function verifyVerificationCode(req, res, next) {
 
         if (!existingUser) {
             return res.status(401)
-            .json({ success: false, message: 'User does not exist' });
+                .json({ success: false, message: 'User does not exist' });
         }
 
-        if(existingUser.verified) {
-            return res.status(400).json({success: false, message: 'User already verified'})
+        if (existingUser.verified) {
+            return res.status(400).json({ success: false, message: 'User already verified' })
         }
 
         // If verification code is not set or validation time is not set, we assume the user has not been verified yet
-        if(!existingUser.verificationCode || !existingUser.verificationCodeValidation) {
+        if (!existingUser.verificationCode || !existingUser.verificationCodeValidation) {
             return res.status(400).json({ success: false, message: 'Something is wrong with the code!' });
         }
 
@@ -162,24 +163,60 @@ async function verifyVerificationCode(req, res, next) {
             existingUser.verificationCode = undefined;
             existingUser.verificationCodeValidation = undefined;
             await existingUser.save();
-            return res.status(200).json({ success: true, message: 'Your account has been verified' }) 
+            return res.status(200).json({ success: true, message: 'Your account has been verified' })
         }
-            return res.status(400).json({ success: false, message: 'unexpected occurred' }) 
+        return res.status(400).json({ success: false, message: 'unexpected occurred' })
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
-}   
+}
 
 async function changePassword(req, res, next) {
-    const { userId, verified } = req.user;
-    const { oldPassword, newPassword} = req.body;
-
     try {
+        // Validate
 
+        console.log("Incoming body:", req.body);
+
+        if (!req.body || !req.body.oldPassword || !req.body.newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "oldPassword and newPassword are required"
+            });
+        }
+
+        const { oldPassword, newPassword } = req.body;
+        const { userId, verified } = req.user;
+
+        const { error } = changePasswordSchema.validate({ oldPassword, newPassword });
+        if (error) {
+            return res.status(401).json({ success: false, message: error.details[0].message });
+        }
+
+        if (!verified) {
+            return res.status(401).json({ success: false, message: 'User is not verified' });
+        }
+
+        const existingUser = await usersModel.findOne({ _id: userId }).select('+password');
+        if (!existingUser) {
+            return res.status(401).json({ success: false, message: 'User does not exist' });
+        }
+
+        const result = await hashingPasswordValidation(oldPassword, existingUser.password);
+        if (!result) {
+            return res.status(401).json({ success: false, message: 'Old password is incorrect' });
+        }
+
+        const hashedPassword = await hashingPassword(newPassword, 12);
+        existingUser.password = hashedPassword;
+        await existingUser.save();
+
+        return res.status(200).json({ success: true, message: 'Password changed successfully' });
     } catch (error) {
-        console.log(error)
+        console.error(error);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
     }
 }
+
 
 module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode, changePassword };

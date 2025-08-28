@@ -1,32 +1,37 @@
 const express = require('express');
-const helmet = require('helmet'); 
+const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const mongoose = require('mongoose')
+const mongoose = require('mongoose');
 require('dotenv').config();
 
-const authRouter = require('./routes/authRouter.js') 
+// Routes
+const authRouter = require('./routes/authRouter.js');
 
-const app = express()
+const app = express();
 
-app.use(cors())
-app.use(helmet())
+// ===== Middlewares =====
+app.use(cors());
+app.use(helmet());
 app.use(cookieParser());
-app.use(express.json()); //...for req.body
-app.use(express.urlencoded({extended: true}))
+app.use(express.json()); // Parse JSON body
+app.use(express.urlencoded({ extended: true })); // Parse form-urlencoded body
 
-app.use('/api/v1/auth', authRouter) //route
+// ===== Routes =====
+app.use('/api/v1/auth', authRouter);
 
-mongoose.connect(process.env.MONGO_URI).then(() => {
-    console.log('Database Connected')
-}).catch ((err) => {
-    console.log(err)
-})
+app.get('/', (req, res) => {
+    res.json({ message: 'Hello Frontend from Backend' });
+});
 
-app.get('/', (req, res ) => {
-    res.json({message: 'Hello Frontend from Backend'})
-})
+// ===== Database Connection =====
+mongoose
+    .connect(process.env.MONGO_URI)
+    .then(() => console.log('✅ Database Connected'))
+    .catch((err) => console.error('❌ DB Connection Error:', err));
 
-app.listen(process.env.PORT, () => {
-    console.log('Connecting')
-})
+// ===== Start Server =====
+const PORT = process.env.PORT || 2000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+});

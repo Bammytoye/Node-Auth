@@ -14,7 +14,7 @@ exports.identifier = (req, res, next) => {
 
     try {
         const userToken = token.split(' ')[1];
-        const jwtVerified = jwt.verify(userToken, process.env.TOKEN_SECRET);
+        const jwtVerified = jwt.verify(userToken, process.env.JWT_SECRET);
         if (jwtVerified) {
             req.user = jwtVerified;
             next();
