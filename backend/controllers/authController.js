@@ -80,9 +80,16 @@ async function signIn(req, res) {
 }
 
 async function logOut(req, res) {
-    res.clearCookie('Authorization')
-        .status(200)
-        .json({ success: true, message: 'User logged out successfully' });
+    res.clearCookie("Authorization", {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: process.env.NODE_ENV === "production"
+    });
+
+    return res.status(200).json({
+        success: true,
+        message: "User logged out successfully"
+    });
 }
 
 async function sendVerificationCode(req, res, next) {
@@ -174,49 +181,81 @@ async function verifyVerificationCode(req, res, next) {
 
 async function changePassword(req, res, next) {
     try {
-        // Validate
-
         console.log("Incoming body:", req.body);
 
+        // 1. Validate body presence
         if (!req.body || !req.body.oldPassword || !req.body.newPassword) {
             return res.status(400).json({
                 success: false,
-                message: "oldPassword and newPassword are required"
+                message: "oldPassword and newPassword are required",
             });
         }
 
         const { oldPassword, newPassword } = req.body;
-        const { userId, verified } = req.user;
 
+        // 2. Validate with Joi schema
         const { error } = changePasswordSchema.validate({ oldPassword, newPassword });
         if (error) {
-            return res.status(401).json({ success: false, message: error.details[0].message });
+            return res
+                .status(401)
+                .json({ success: false, message: error.details[0].message });
         }
 
-        if (!verified) {
-            return res.status(401).json({ success: false, message: 'User is not verified' });
+        // 3. Ensure req.user exists (authMiddleware should set this)
+        if (!req.user || !req.user.userId) {
+            return res
+                .status(401)
+                .json({ success: false, message: "Unauthorized: No user context" });
         }
 
-        const existingUser = await usersModel.findOne({ _id: userId }).select('+password');
+        const { userId } = req.user;
+
+        // 4. Fetch user from DB (always get latest verification + password)
+        const existingUser = await usersModel
+            .findOne({ _id: userId })
+            .select("+password");
+
         if (!existingUser) {
-            return res.status(401).json({ success: false, message: 'User does not exist' });
+            return res
+                .status(401)
+                .json({ success: false, message: "User does not exist" });
         }
 
-        const result = await hashingPasswordValidation(oldPassword, existingUser.password);
-        if (!result) {
-            return res.status(401).json({ success: false, message: 'Old password is incorrect' });
+        // 5. Check verification from DB (not from stale JWT)
+        if (!existingUser.verified) {
+            return res
+                .status(401)
+                .json({ success: false, message: "User is not verified" });
         }
 
+        // 6. Check old password correctness
+        const isOldPasswordValid = await hashingPasswordValidation(
+            oldPassword,
+            existingUser.password
+        );
+
+        if (!isOldPasswordValid) {
+            return res
+                .status(401)
+                .json({ success: false, message: "Old password is incorrect" });
+        }
+
+        // 7. Hash new password and save
         const hashedPassword = await hashingPassword(newPassword, 12);
         existingUser.password = hashedPassword;
         await existingUser.save();
 
-        return res.status(200).json({ success: true, message: 'Password changed successfully' });
+        return res
+            .status(200)
+            .json({ success: true, message: "Password changed successfully" });
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: 'Something went wrong' });
+        console.error("Error in changePassword:", error);
+        return res
+            .status(500)
+            .json({ success: false, message: "Something went wrong" });
     }
 }
+
 
 
 module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode, changePassword };
