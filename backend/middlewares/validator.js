@@ -80,4 +80,28 @@ const changePasswordSchema = Joi.object({
 });
 
 
-module.exports = { signUpSchema, signInSchema, acceptCodeSchema, changePasswordSchema };
+const acceptForgotPasswordCodeSchema  = Joi.object({
+    email: Joi.string()
+        .min(6)
+        .max(70)
+        .required()
+        .email({
+            tlds: { allow: ['com', 'net'] }
+        }),
+    providedCode: Joi.number().required(),
+
+    newPassword: Joi.string()
+        .required()
+        .pattern(
+            new RegExp("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,30}$")
+        )
+        .messages({
+            "string.empty": "New password is required",
+            "string.min": "New password must be at least 6 characters long",
+            "string.max": "New password must not exceed 30 characters",
+            "string.pattern.base":
+                "New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        }),    
+})
+
+module.exports = { signUpSchema, signInSchema, acceptCodeSchema, changePasswordSchema, acceptForgotPasswordCodeSchema };

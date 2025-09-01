@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { signUpSchema, signInSchema, acceptCodeSchema, changePasswordSchema } = require("../middlewares/validator");
+const { signUpSchema, signInSchema, acceptCodeSchema, changePasswordSchema, acceptForgotPasswordCodeSchema } = require("../middlewares/validator");
 const usersModel = require("../models/usersModel");
 const { hashingPassword, hashingPasswordValidation } = require("../utils/hashingPassword");
 const { transport } = require('../middlewares/sendMail');
@@ -256,6 +256,143 @@ async function changePassword(req, res, next) {
     }
 }
 
+async function sendForgotPasswordCode(req, res, next) {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required",
+            });
+        }
+
+        // 1. Find user by email
+        const existingUser = await usersModel.findOne({ email });
+        if (!existingUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User with this email does not exist",
+            });
+        }
+
+        const codeValue = Math.floor(Math.random() * 1000000).toString();
+        let info = await transport.sendMail({
+            from: process.env.NODE_CODE_SENDING_EMAIL_ADDRESS,
+            to: existingUser.email,
+            subject: 'Forgot Password Code',
+            html: '<h1>' + codeValue + '</h1>',
+        })
+
+        if (info.accepted[0] === existingUser.email) {
+            const hashedCodeValue = hmacProcess(
+                codeValue,
+                process.env.HMAC_VERIFICATION_CODE_SECRET
+            );
+            existingUser.forgotPasswordCode = hashedCodeValue;
+            existingUser.forgotPasswordCodeValidation = Date.now();
+            await existingUser.save();
+            return res.status(200).json({ success: true, message: 'code sent successfully' })
+        }
+        return res.status(400).json({ success: false, message: "Password reset code could not be sent", });
+
+    } catch (error) {
+        console.error("Error in sendForgotPasswordCode:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+}
+
+const bcrypt = require("bcryptjs");
+
+async function verifyForgotPasswordCode(req, res, next) {
+    const { email, providedCode, newPassword } = req.body;
+
+    try {
+        // ✅ Validate input
+        const { error } = acceptForgotPasswordCodeSchema.validate({
+            email,
+            providedCode,
+            newPassword,
+        });
+
+        if (error) {
+            return res.status(401).json({
+                success: false,
+                message: error.details[0].message,
+            });
+        }
+
+        const codeValue = providedCode.toString();
+
+        // ✅ Find user
+        const existingUser = await usersModel.findOne({ email }).select(
+            "+forgotPasswordCode +forgotPasswordCodeValidation"
+        );
+
+        if (!existingUser) {
+            return res.status(401).json({
+                success: false,
+                message: "User does not exist!",
+            });
+        }
+
+        if (
+            !existingUser.forgotPasswordCode ||
+            !existingUser.forgotPasswordCodeValidation
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Something is wrong with the code!",
+            });
+        }
+
+        // ✅ Expiry check (5 minutes)
+        if (Date.now() - existingUser.forgotPasswordCodeValidation > 5 * 60 * 1000) {
+            return res.status(400).json({
+                success: false,
+                message: "Code has expired!",
+            });
+        }
+
+        // ✅ Hash provided code and compare
+        const hashedCodeValue = hmacProcess(
+            codeValue,
+            process.env.HMAC_VERIFICATION_CODE_SECRET
+        );
+
+        if (hashedCodeValue !== existingUser.forgotPasswordCode) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid verification code!",
+            });
+        }
+
+        // ✅ Code is valid → reset password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        existingUser.password = hashedPassword;
+        existingUser.forgotPasswordCode = undefined;
+        existingUser.forgotPasswordCodeValidation = undefined;
+
+        await existingUser.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Password has been reset successfully!",
+        });
+    } catch (error) {
+        console.error("Error in verifyForgotPasswordCode:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+}
 
 
-module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode, changePassword };
+
+module.exports = { signUp, signIn, logOut, sendVerificationCode, verifyVerificationCode, changePassword, verifyForgotPasswordCode, sendForgotPasswordCode, };
